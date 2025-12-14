@@ -36,6 +36,7 @@ export default function NotesPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [error, setError] = useState("");
+  const [sortBy, setSortBy] = useState<"date" | "name" | "category">("date");
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -58,15 +59,11 @@ export default function NotesPage() {
               ...(d.data() as any),
             })) as Note[];
             
-            // sort by creation date (newest first)
-            notesData.sort((a, b) => {
-              const timeA = a.createdAt?.toMillis?.() || 0;
-              const timeB = b.createdAt?.toMillis?.() || 0;
-              return timeB - timeA;
-            });
+            // Sort notes based on selected sort option
+            const sortedNotes = sortNotes(notesData, sortBy);
             
-            // deletes duplicates based on id
-            const uniqueNotes = notesData.filter((note, index, self) =>
+            // Remove duplicates based on id
+            const uniqueNotes = sortedNotes.filter((note, index, self) =>
               index === self.findIndex((n) => n.id === note.id)
             );
             
@@ -93,6 +90,50 @@ export default function NotesPage() {
     return () => unsub();
   }, []);
 
+  // Sort Function
+  const sortNotes = (notesToSort: Note[], sortOption: "date" | "name" | "category") => {
+    const sorted = [...notesToSort];
+    
+    if (sortOption === "date") {
+      // Sort by latest
+      sorted.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis?.() || 0;
+        const timeB = b.createdAt?.toMillis?.() || 0;
+        return timeB - timeA;
+      });
+    } else if (sortOption === "name") {
+      // Sort by alphabetically
+      sorted.sort((a, b) => {
+        const titleA = a.title?.toLowerCase() || "";
+        const titleB = b.title?.toLowerCase() || "";
+        return titleA.localeCompare(titleB);
+      });
+    } else if (sortOption === "category") {
+      // Sort by category, then title
+      sorted.sort((a, b) => {
+        const categoryA = a.category?.toLowerCase() || "";
+        const categoryB = b.category?.toLowerCase() || "";
+        if (categoryA === categoryB) {
+          // If same category, sort title
+          const titleA = a.title?.toLowerCase() || "";
+          const titleB = b.title?.toLowerCase() || "";
+          return titleA.localeCompare(titleB);
+        }
+        return categoryA.localeCompare(categoryB);
+      });
+    }
+    
+    return sorted;
+  };
+
+  // Sort notes when sortBy changes
+  useEffect(() => {
+    if (notes.length > 0) {
+      const sorted = sortNotes(notes, sortBy);
+      setNotes(sorted);
+    }
+  }, [sortBy]);
+
   async function addNote() {
     if (!auth.currentUser) {
       setError("You must be logged in to save notes");
@@ -111,7 +152,7 @@ export default function NotesPage() {
       const newNote = {
         uid: auth.currentUser.uid,
         title: title.trim(),
-        category: category.trim() || "General",
+        category: category.trim() || "Category",
         content: content.trim(),
         createdAt: serverTimestamp(),
       };
@@ -141,7 +182,7 @@ export default function NotesPage() {
       console.log("Updating note in Firebase:", selectedNote.id);
       await updateDoc(doc(db, "notes", selectedNote.id), {
         title: title.trim(),
-        category: category.trim() || "General",
+        category: category.trim() || "Category",
         content: content.trim(),
         updatedAt: serverTimestamp(),
       });
@@ -230,6 +271,34 @@ export default function NotesPage() {
           )}
         </div>
 
+        {/* Sorting Buttons */}
+        <div className="mt-4 px-4">
+          <div className="flex justify-center gap-2 mb-4">
+            <button
+              onClick={() => setSortBy("date")}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                sortBy === "date"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}>Date</button>
+            <button
+              onClick={() => setSortBy("name")}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                sortBy === "name"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}>Name</button>
+
+            <button
+              onClick={() => setSortBy("category")}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                sortBy === "category"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}>Category</button>
+          </div>
+        </div>
+
         {/* Saved Notes List */}
         <div className="flex-1 overflow-y-auto p-4">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
@@ -260,23 +329,18 @@ export default function NotesPage() {
                         deleteNote(note.id);
                       }}
                       className="text-gray-400 hover:text-red-500 text-sm px-2 py-0.5 rounded hover:bg-red-50 transition-colors"
-                      title="Delete note"
-                    >
-                      ×
-                    </button>
+                      title="Delete note">×</button>
                   </div>
                   <div className="flex items-center mt-1">
                     <span className="inline-block px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded-full">
-                      {note.category || "General"}
+                      {note.category || "Category"}
                     </span>
                     <span className="text-xs text-gray-400 ml-auto">
                       {note.createdAt?.toDate?.()?.toLocaleDateString() || "Today"}
                     </span>
                   </div>
                   {note.content && (
-                    <p className="text-sm text-gray-600 truncate mt-2">
-                      {note.content}
-                    </p>
+                    <p className="text-sm text-gray-600 truncate mt-2">{note.content}</p>
                   )}
                 </div>
               ))}
@@ -289,9 +353,7 @@ export default function NotesPage() {
           <button
             onClick={handleCreateNew}
             className="w-full py-3 px-4 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center justify-center"
-          >
-            <span className="mr-2">+</span> New Note
-          </button>
+          ><span className="mr-2">+</span> New Note</button>
         </div>
       </aside>
 
@@ -301,14 +363,10 @@ export default function NotesPage() {
         {(error || saveMessage) && (
           <div className="px-6 pt-4">
             {error && (
-              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                {error}
-              </div>
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">{error}</div>
             )}
             {saveMessage && (
-              <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
-                {saveMessage}
-              </div>
+              <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">{saveMessage}</div>
             )}
           </div>
         )}
@@ -354,9 +412,7 @@ export default function NotesPage() {
                   <span
                     className="text-lg text-gray-600 cursor-pointer hover:bg-gray-100 px-1 rounded"
                     onClick={() => setIsEditingCategory(true)}
-                  >
-                    {category || "General"}
-                  </span>)}
+                    >{category || "Category"}</span>)}
               </div>
             </div>
 
