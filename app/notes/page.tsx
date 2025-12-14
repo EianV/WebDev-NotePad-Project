@@ -22,6 +22,7 @@ type Note = {
   content: string;
   createdAt: any;
   uid: string;
+  updatedAt?: any;
 };
 
 export default function NotesPage() {
@@ -32,34 +33,60 @@ export default function NotesPage() {
   const [content, setContent] = useState("");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingCategory, setIsEditingCategory] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
-      if (!user) window.location.href = "/";
-      else {
+      if (!user) {
+        window.location.href = "/";
+        return;
+      } else {
+        console.log("User authenticated:", user.email);
         const q = query(
           collection(db, "notes"),
           where("uid", "==", user.uid)
         );
 
-        onSnapshot(q, (snap) => {
-          const notesData = snap.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as any),
-          })) as Note[];
-          
-          // Sort by creation date (newest first)
-          notesData.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
-          setNotes(notesData);
-          
-          // Select the first note if none selected
-          if (notesData.length > 0 && !selectedNote) {
-            setSelectedNote(notesData[0]);
-            setTitle(notesData[0].title);
-            setCategory(notesData[0].category);
-            setContent(notesData[0].content);
+        // Set up real-time listener
+        const unsubscribeSnapshot = onSnapshot(
+          q,
+          (snap) => {
+            const notesData = snap.docs.map((d) => ({
+              id: d.id,
+              ...(d.data() as any),
+            })) as Note[];
+            
+            // sort by creation date (newest first)
+            notesData.sort((a, b) => {
+              const timeA = a.createdAt?.toMillis?.() || 0;
+              const timeB = b.createdAt?.toMillis?.() || 0;
+              return timeB - timeA;
+            });
+            
+            // deletes duplicates based on id
+            const uniqueNotes = notesData.filter((note, index, self) =>
+              index === self.findIndex((n) => n.id === note.id)
+            );
+            
+            setNotes(uniqueNotes);
+            console.log("Notes loaded from Firebase:", uniqueNotes.length);
+            
+            // Select the first note if none selected
+            if (uniqueNotes.length > 0 && !selectedNote) {
+              setSelectedNote(uniqueNotes[0]);
+              setTitle(uniqueNotes[0].title);
+              setCategory(uniqueNotes[0].category);
+              setContent(uniqueNotes[0].content);
+            }
+          },
+          (error) => {
+            console.error("Firestore error:", error);
+            setError("Failed to load notes from database");
           }
-        });
+        );
+        return () => unsubscribeSnapshot();
       }
     });
 
@@ -67,50 +94,90 @@ export default function NotesPage() {
   }, []);
 
   async function addNote() {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser) {
+      setError("You must be logged in to save notes");
+      return;
+    }
 
-    const newNote = {
-      uid: auth.currentUser.uid,
-      title: title || "Untitled Note",
-      category: category || "General",
-      content: content || "",
-      createdAt: serverTimestamp(),
-    };
+    if (!title.trim()) {
+      setError("Please enter a title for your note");
+      return;
+    }
 
-    const docRef = await addDoc(collection(db, "notes"), newNote);
-    
-    // Select the newly created note
-    const noteWithId = { id: docRef.id, ...newNote } as Note;
-    setSelectedNote(noteWithId);
-    
-    // Reset form only if we're creating a brand new note
-    if (!selectedNote) {
-      setTitle("");
-      setCategory("");
-      setContent("");
+    setIsSaving(true);
+    setError("");
+
+    try {
+      const newNote = {
+        uid: auth.currentUser.uid,
+        title: title.trim(),
+        category: category.trim() || "General",
+        content: content.trim(),
+        createdAt: serverTimestamp(),
+      };
+
+      console.log("Saving new note to Firebase...");
+      const docRef = await addDoc(collection(db, "notes"), newNote);
+      console.log("Note saved with ID:", docRef.id);
+      
+      setSaveMessage("Note saved successfully!");
+      
+      setTimeout(() => setSaveMessage(""), 3000);
+    } catch (error: any) {
+      console.error("Error saving note:", error);
+      setError(`Failed to save note: ${error.message || "Unknown error"}`);
+    } finally {
+      setIsSaving(false);
     }
   }
 
   async function updateNote() {
     if (!selectedNote) return;
     
-    await updateDoc(doc(db, "notes", selectedNote.id), {
-      title,
-      category,
-      content,
-      updatedAt: serverTimestamp(),
-    });
+    setIsSaving(true);
+    setError("");
+
+    try {
+      console.log("Updating note in Firebase:", selectedNote.id);
+      await updateDoc(doc(db, "notes", selectedNote.id), {
+        title: title.trim(),
+        category: category.trim() || "General",
+        content: content.trim(),
+        updatedAt: serverTimestamp(),
+      });
+      
+      console.log("Note updated successfully");
+      setSaveMessage("Note updated successfully!");
+      setTimeout(() => setSaveMessage(""), 3000);
+    } catch (error: any) {
+      console.error("Error updating note:", error);
+      setError(`Failed to update note: ${error.message || "Unknown error"}`);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function deleteNote(id: string) {
-    await deleteDoc(doc(db, "notes", id));
+    if (!confirm("Are you sure you want to delete this note?")) return;
     
-    // If deleting the currently selected note, clear the form
-    if (selectedNote?.id === id) {
-      setSelectedNote(null);
-      setTitle("");
-      setCategory("");
-      setContent("");
+    try {
+      console.log("Deleting note from Firebase:", id);
+      await deleteDoc(doc(db, "notes", id));
+      console.log("Note deleted successfully");
+      
+      // Update local state 
+      setNotes(prev => prev.filter(note => note.id !== id));
+      
+      // If deleting the currently selected note, clear the form
+      if (selectedNote?.id === id) {
+        setSelectedNote(null);
+        setTitle("");
+        setCategory("");
+        setContent("");
+      }
+    } catch (error: any) {
+      console.error("Error deleting note:", error);
+      setError(`Failed to delete note: ${error.message || "Unknown error"}`);
     }
   }
 
@@ -121,9 +188,15 @@ export default function NotesPage() {
     setContent(note.content);
     setIsEditingTitle(false);
     setIsEditingCategory(false);
+    setError("");
   }
 
   function handleSave() {
+    if (!title.trim()) {
+      setError("Please enter a title for your note");
+      return;
+    }
+    
     if (selectedNote) {
       updateNote();
     } else {
@@ -138,16 +211,23 @@ export default function NotesPage() {
     setContent("");
     setIsEditingTitle(false);
     setIsEditingCategory(false);
+    setError("");
+    setSaveMessage("");
   }
 
   return (
     <div className="min-h-screen flex bg-gray-50">
-      {/* Sidebar */}
+      {/* sidebar */}
       <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
-        {/* Sidebar Header */}
+        {/* Sideheader */}
         <div className="p-6 border-b border-gray-200">
           <h1 className="text-2xl font-bold text-gray-800">NotePad</h1>
           <p className="text-sm text-gray-500 mt-1">Your personal notes</p>
+          {notes.length > 0 && (
+            <p className="text-xs text-gray-400 mt-1">
+              {notes.length} saved {notes.length === 1 ? 'note' : 'notes'}
+            </p>
+          )}
         </div>
 
         {/* Saved Notes List */}
@@ -179,7 +259,8 @@ export default function NotesPage() {
                         e.stopPropagation();
                         deleteNote(note.id);
                       }}
-                      className="text-gray-400 hover:text-red-500 text-xs"
+                      className="text-gray-400 hover:text-red-500 text-sm px-2 py-0.5 rounded hover:bg-red-50 transition-colors"
+                      title="Delete note"
                     >
                       ×
                     </button>
@@ -189,7 +270,7 @@ export default function NotesPage() {
                       {note.category || "General"}
                     </span>
                     <span className="text-xs text-gray-400 ml-auto">
-                      {note.createdAt?.toDate().toLocaleDateString()}
+                      {note.createdAt?.toDate?.()?.toLocaleDateString() || "Today"}
                     </span>
                   </div>
                   {note.content && (
@@ -209,12 +290,29 @@ export default function NotesPage() {
             onClick={handleCreateNew}
             className="w-full py-3 px-4 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center justify-center"
           >
-            <span className="mr-2">+</span> New Note</button>
+            <span className="mr-2">+</span> New Note
+          </button>
         </div>
       </aside>
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col">
+        {/* Status Messages */}
+        {(error || saveMessage) && (
+          <div className="px-6 pt-4">
+            {error && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                {error}
+              </div>
+            )}
+            {saveMessage && (
+              <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+                {saveMessage}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Header with Title, Category, and Logout */}
         <header className="bg-white border-b border-gray-200 px-6 py-4">
           <div className="flex justify-between items-center">
@@ -226,16 +324,6 @@ export default function NotesPage() {
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    onBlur={() => {
-                      setIsEditingTitle(false);
-                      if (selectedNote) updateNote();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        setIsEditingTitle(false);
-                        if (selectedNote) updateNote();
-                      }
-                    }}
                     className="text-2xl font-bold text-gray-800 border-b-2 border-blue-500 bg-transparent outline-none px-1"
                     autoFocus
                   />
@@ -259,16 +347,6 @@ export default function NotesPage() {
                     type="text"
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    onBlur={() => {
-                      setIsEditingCategory(false);
-                      if (selectedNote) updateNote();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        setIsEditingCategory(false);
-                        if (selectedNote) updateNote();
-                      }
-                    }}
                     className="text-lg text-gray-600 border-b-2 border-blue-500 bg-transparent outline-none px-1"
                     autoFocus
                   />
@@ -278,8 +356,7 @@ export default function NotesPage() {
                     onClick={() => setIsEditingCategory(true)}
                   >
                     {category || "General"}
-                  </span>
-                )}
+                  </span>)}
               </div>
             </div>
 
@@ -306,16 +383,29 @@ export default function NotesPage() {
               rows={10}
             />
             
-            {/* Save Button */}
-            <div className="p-4 border-t border-gray-200">
+            {/* Save Button and Status */}
+            <div className="p-4 border-t border-gray-200 flex justify-between items-center">
+              <div className="text-sm text-gray-500">
+                {selectedNote ? (
+                  <span>
+                    {selectedNote.updatedAt 
+                      ? `Updated: ${selectedNote.updatedAt.toDate?.()?.toLocaleTimeString()}` 
+                      : `Created: ${selectedNote.createdAt?.toDate?.()?.toLocaleDateString()}`}
+                  </span>) : (<span>New note - not saved yet</span>)}
+              </div>
+              
               <button
                 onClick={handleSave}
-                className="px-6 py-3 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors flex items-center"
+                disabled={isSaving || !title.trim()}
+                className={`px-6 py-3 rounded-lg font-medium transition-colors flex items-center ${
+                  isSaving || !title.trim()
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-green-500 text-white hover:bg-green-600"}`}
               >
-                <span className="mr-2">
-                  {selectedNote ? "Update Note" : "Save Note"}
-                </span>
-                <i className="fas fa-save"></i>
+                {isSaving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>Saving...</>
+                ) : selectedNote ? ("Update Note") : ("Save Note")}
               </button>
             </div>
           </div>
