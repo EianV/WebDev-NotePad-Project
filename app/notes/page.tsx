@@ -313,7 +313,7 @@ export default function NotesPage() {
           </div>
         )}
 
-        {/* Header with Title, Category, and Logout */}
+        {/* Header with Title, Category, and Log out */}
         <header className="bg-white border-b border-gray-200 px-6 py-4">
           <div className="flex justify-between items-center">
             <div className="flex items-center space-x-4">
@@ -360,12 +360,12 @@ export default function NotesPage() {
               </div>
             </div>
 
-            {/* Logout Button */}
+            {/* Log out Button */}
             <button
               onClick={() => signOut(auth)}
               className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg font-medium transition-colors flex items-center"
             >
-              <span className="mr-2">LogOut</span>
+              <span className="mr-2">Log Out</span>
               <i className="fas fa-sign-out-alt"></i>
             </button>
           </div>
