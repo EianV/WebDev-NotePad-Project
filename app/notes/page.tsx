@@ -133,7 +133,7 @@ export default function NotesPage() {
       setNotes(sorted);
     }
   }, [sortBy]);
-
+  //creating a new note function
   async function addNote() {
     if (!auth.currentUser) {
       setError("You must be logged in to save notes");
@@ -171,7 +171,7 @@ export default function NotesPage() {
       setIsSaving(false);
     }
   }
-
+  //updating a selected note
   async function updateNote() {
     if (!selectedNote) return;
     
@@ -197,7 +197,7 @@ export default function NotesPage() {
       setIsSaving(false);
     }
   }
-
+  // deleting a note function
   async function deleteNote(id: string) {
     if (!confirm("Are you sure you want to delete this note?")) return;
     
@@ -221,7 +221,7 @@ export default function NotesPage() {
       setError(`Failed to delete note: ${error.message || "Unknown error"}`);
     }
   }
-
+  // Select note
   function handleNoteSelect(note: Note) {
     setSelectedNote(note);
     setTitle(note.title);
